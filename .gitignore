@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+
+# Generated media from example runs
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mp3
+*.wav
+
+node_modules/
+__pycache__/
