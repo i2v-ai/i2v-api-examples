@@ -36,7 +36,7 @@ node quickstart/media.mjs quote video
 
 Model-specific examples in `models/` quote the selected inputs and stop by default. They submit only when you set both `I2V_MAX_COST_USD` and `I2V_RECEIPT_PATH`. Set a reviewed USD decimal amount and a new receipt file in a private folder. Bash scripts require curl and jq. Use the receipt to recover the same operation after a timeout.
 
-- [cURL, Node.js, and Python quickstart](./quickstart) covers quote, submit, and recovery.
+- [cURL, Node.js, and Python quickstart](./quickstart) covers quote, signed upload, submit, and recovery.
 - [Next.js starter](./starters/nextjs) demonstrates job ownership, persistence, and signed webhooks.
 - [Workflow guides](./workflows) cover Make and Zapier HTTP integration and include importable n8n templates.
 
@@ -459,7 +459,7 @@ Delivery is signed. Compute a hexadecimal HMAC-SHA256 over `X-I2V-Timestamp + ".
 
 Models that take reference images, video or audio accept **publicly reachable URLs**: your CDN, object storage, or any public site the generation backend can fetch. Localhost, private networks and URLs that need a login do not work.
 
-The REST API has no upload endpoint, so host the file yourself and pass its URL in `imageUrls`, `urls`, `referenceImageUrls`, `referenceVideoUrls`, `referenceAudioUrls` or `videoUrl`. The examples in this repo use assets served from `https://i2v.ai`, so they run as-is — replace them with your own URLs for real work.
+For a local file, use the [signed upload flow](https://i2v.ai/docs/media-workflow). Request a ticket from `POST /api/v1/assets`, send the bytes to storage, and confirm the upload on the API. Use the returned URL in the model's reference field. The [Node.js quickstart](./quickstart#use-a-local-reference-image) runs that flow for PNG, JPEG, or WebP.
 
 Two input shapes are easy to confuse:
 

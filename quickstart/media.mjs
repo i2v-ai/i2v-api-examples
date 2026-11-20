@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { basename, extname } from 'node:path';
 import { mediaApi, approvedSubmission } from '../lib/media.mjs';
 
 const [command = 'catalog', argument, path] = process.argv.slice(2);
@@ -22,6 +23,15 @@ try {
     case 'catalog':
       show((await client.catalog()).data.map(({ id, name, mediaType }) => ({ id, name, mediaType })));
       break;
+    case 'upload': {
+      const types = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+      const type = argument && types[extname(argument).toLowerCase()];
+      if (!type) throw new Error('Pass a local PNG, JPEG, or WebP reference image.');
+      const file = new Blob([await readFile(argument)], { type });
+      const { id, url } = await client.uploadAsset(file, basename(argument));
+      show({ assetId: id, url });
+      break;
+    }
     case 'quote': {
       const quote = await client.quote(spec);
       show({ model: quote.model, maximum: quote.maximum, expectedRevision: quote.expectedRevision });
@@ -53,7 +63,7 @@ try {
       show(await client.task(argument));
       break;
     default:
-      throw new Error('Commands: catalog, quote, submit, receipt, replay, status');
+      throw new Error('Commands: catalog, upload, quote, submit, receipt, replay, status');
   }
 } catch (error) {
   console.error(JSON.stringify({

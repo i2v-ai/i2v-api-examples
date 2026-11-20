@@ -9,7 +9,21 @@ node quickstart/media.mjs quote image
 node quickstart/media.mjs quote video
 ```
 
-The quote sends the model and its actual inputs. It creates no task and reserves no balance. For a reference-image video, set `I2V_REFERENCE_IMAGE_URL` to the verified URL produced by the [asset upload flow](https://i2v.ai/docs/media-workflow). Review the new quote before approving a budget.
+The quote sends the model and its actual inputs. It creates no task and reserves no balance.
+
+## Use a local reference image
+
+Pass a PNG, JPEG, or WebP file you are allowed to upload. The command requests a signed ticket, uploads to storage, and confirms the asset with the REST API. It outputs the confirmed reference URL and asset ID.
+
+```bash
+node quickstart/media.mjs upload ./product.png
+export I2V_REFERENCE_IMAGE_URL='PASTE_THE_CONFIRMED_URL'
+node quickstart/media.mjs quote video
+```
+
+Use the same `I2V_REFERENCE_IMAGE_URL` for the quote and submission. If you already have a reference image on a publicly reachable URL, set it directly and proceed to the quote. See the [asset upload contract](https://i2v.ai/docs/media-workflow) for ticket expiry and verification errors.
+
+## Submit and recover
 
 To authorize a submission, replace the placeholder with your approved USD amount and use a new receipt path in a private directory. This example always obtains a fresh quote and checks it against that cap.
 
