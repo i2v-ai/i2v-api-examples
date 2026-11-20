@@ -11,6 +11,10 @@
 *.mp3
 *.wav
 
+# Media checked in for the starter's mock mode and upload tests.
+!starters/nextjs/public/fixture/image.png
+!starters/nextjs/public/fixture/video.mp4
+
 node_modules/
 __pycache__/
 

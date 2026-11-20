@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { mediaApi } from '../../../lib/media.mjs';
 import { createApplication } from '../lib/application.mjs';
@@ -44,6 +45,15 @@ function signedCallback(handle, task, eventId, { invalid = false } = {}) {
     },
   });
 }
+
+test('the mock image and video fixtures are present in a clean checkout', async () => {
+  const [image, video] = await Promise.all([
+    readFile(new URL('../public/fixture/image.png', import.meta.url)),
+    readFile(new URL('../public/fixture/video.mp4', import.meta.url)),
+  ]);
+  assert.equal(image.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(video.toString('ascii', 4, 8), 'ftyp');
+});
 
 test('quote is read-only, and repeated submissions have one provider call', async t => {
   let count = 0;
