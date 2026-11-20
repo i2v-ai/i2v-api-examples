@@ -12,6 +12,15 @@ const response = (body, status = 200, retryAfter) => Response.json(body, {
 });
 const failure = (message, status, code) => Object.assign(new Error(message), { status, code });
 
+async function readReceipt(provider, key) {
+  try {
+    return await provider.receipt(key);
+  } catch (error) {
+    if (error.status !== 404 || error.code !== 'not_found') throw error;
+    return { status: 'not_found' };
+  }
+}
+
 function readSpec(body) {
   if (!supportedModels.has(body?.model) || typeof body.prompt !== 'string' ||
       !body.prompt.trim() || body.prompt.length > 2000) {
@@ -99,8 +108,9 @@ export function createApplication({ store, mode, tenants, getProvider, callbackU
         store.attach(tenant.id, operationId, accepted.taskId);
         return response({ operationId, taskId: accepted.taskId, mode });
       } catch (error) {
-        // Keep the persisted request after every uncertain result. Recovery is explicit.
-        if (!error.status || error.status >= 500) {
+        // Keep the persisted request after every uncertain or retryable result.
+        if (!error.status || error.status >= 500 || error.status === 429 ||
+            error.code === 'SUBMISSION_PENDING') {
           return response({ operationId, recoveryRequired: true, mode }, 202, error.retryAfter);
         }
         throw error;
@@ -134,17 +144,17 @@ export function createApplication({ store, mode, tenants, getProvider, callbackU
         return response({ ...result, mode });
       }
       if (job.task_id) return response({ operationId: job.operation, taskId: job.task_id, mode });
-      const receipt = await provider.receipt(job.provider_key);
+      const receipt = await readReceipt(provider, job.provider_key);
       if (receipt.status === 'accepted') {
         store.attach(tenant.id, job.operation, receipt.taskId);
         return response({ operationId: job.operation, taskId: receipt.taskId, mode });
       }
-      if (path === 'replay' && receipt.status === 'retryable') {
+      if (path === 'replay' && ['retryable', 'not_found'].includes(receipt.status)) {
         const accepted = await provider.submit(job.payload, job.provider_key);
         store.attach(tenant.id, job.operation, accepted.taskId);
         return response({ operationId: job.operation, taskId: accepted.taskId, mode });
       }
-      return response({ operationId: job.operation, receipt, mode }, 202);
+      return response({ operationId: job.operation, receipt, mode }, 202, receipt.retryAfter);
     }
 
     return response({ error: 'Route not found.' }, 404);

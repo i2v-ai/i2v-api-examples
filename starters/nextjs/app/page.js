@@ -1,6 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+function retryDelay(value) {
+  if (value === null) return 0;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : 0;
+}
 
 export default function Page() {
   const [token, setToken] = useState('');
@@ -13,7 +20,14 @@ export default function Page() {
   const [current, setCurrent] = useState(null);
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
+  const [retryAt, setRetryAt] = useState(0);
   const input = { model, prompt, referenceImageUrl };
+
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = setTimeout(() => setRetryAt(0), Math.max(0, retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [retryAt]);
 
   async function call(path, body) {
     const result = await fetch('/api/' + path, {
@@ -21,6 +35,8 @@ export default function Page() {
       headers: { Authorization: 'Bearer ' + token, ...(body && { 'Content-Type': 'application/json' }) },
       body: body ? JSON.stringify(body) : undefined,
     });
+    const delay = retryDelay(result.headers.get('Retry-After'));
+    if (delay) setRetryAt(Date.now() + delay);
     const data = await result.json();
     if (!result.ok) throw new Error(data.error ?? `Request failed (${result.status})`);
     return data;
@@ -105,10 +121,11 @@ export default function Page() {
           <button disabled={pending || !token || !operation} onClick={() => run(async () =>
             setCurrent(await call('recover', { operationId: operation }))
           )}>Recover submission</button>
-          {current?.receipt?.status === 'retryable' && <button disabled={pending} onClick={() => run(async () =>
+          {['retryable', 'not_found'].includes(current?.receipt?.status) && <button disabled={pending || !!retryAt} onClick={() => run(async () =>
             setCurrent(await call('replay', { operationId: operation }))
           )}>Replay original submission</button>}
         </div>
+        {!!retryAt && <p role="status">Wait until {new Date(retryAt).toLocaleTimeString()} before replaying this submission.</p>}
         {current && <p role="status">{current.mode === 'mock' ? 'Simulated · ' : ''}
           {current.lifecycle?.phase ?? current.status ?? current.receipt?.status ??
             (current.recoveryRequired ? 'Acceptance unknown. Recover the original submission.' : 'Task accepted.')}

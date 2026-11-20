@@ -15,7 +15,7 @@ export function fixtureMediaApi() {
       return { taskId: taskIdFor(key, spec) };
     },
     async receipt() {
-      throw Object.assign(new Error('Fixture receipt is missing.'), { status: 404 });
+      throw Object.assign(new Error('Fixture receipt is missing.'), { status: 404, code: 'not_found' });
     },
     async task(taskId) {
       return {

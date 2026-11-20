@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { mediaApi } from '../../../lib/media.mjs';
 import { createApplication } from '../lib/application.mjs';
 import { openStore } from '../lib/store.mjs';
 import { fixtureMediaApi } from '../lib/fixture.mjs';
@@ -13,12 +14,12 @@ const tenants = [
   { id: 'beta', token: 'beta-token', maxCostUsd: '0.05000000' },
 ];
 
-function setup(t, overrides = {}) {
+function setup(t, overrides = {}, applicationTenants = tenants) {
   const store = openStore(':memory:');
   t.after(() => store.close());
   const fixture = fixtureMediaApi();
   return createApplication({
-    store, mode: 'mock', tenants, signingKeys: { active: key }, now: () => now,
+    store, mode: 'mock', tenants: applicationTenants, signingKeys: { active: key }, now: () => now,
     getProvider: () => ({ ...fixture, ...overrides }),
   });
 }
@@ -68,7 +69,7 @@ test('unknown submission recovers the original provider operation', async t => {
   const handle = setup(t, {
     async submit(_payload, providerKey) {
       original = providerKey;
-      throw new Error('Fixture lost the acceptance response.');
+      throw new DOMException('Fixture lost the acceptance response.', 'TimeoutError');
     },
     async receipt(providerKey) {
       assert.equal(original, providerKey);
@@ -82,6 +83,78 @@ test('unknown submission recovers the original provider operation', async t => {
   assert.equal((await request(handle, 'submit', job)).status, 202);
   const recovered = await request(handle, 'recover', { operationId: job.operationId });
   assert.equal((await recovered.json()).taskId, 'accepted-once');
+});
+
+test('rate-limited submission retains Retry-After and can be replayed only with its original request', async t => {
+  const calls = [];
+  const provider = mediaApi({
+    apiKey: 'isolated-fixture-key',
+    async transport(url, init) {
+      calls.push({ path: url.pathname, key: init.headers['Idempotency-Key'], body: init.body });
+      if (calls.length === 1) {
+        return Response.json({ error: { code: 'rate_limit' } }, { status: 429, headers: { 'Retry-After': '30' } });
+      }
+      if (url.pathname.endsWith('/submission')) {
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 });
+      }
+      return Response.json({ taskId: 'accepted-after-rate-limit' });
+    },
+  });
+  const handle = setup(t, provider);
+  const job = submission(randomUUID());
+  const limited = await request(handle, 'submit', job);
+  assert.equal(limited.status, 202);
+  assert.equal(limited.headers.get('Retry-After'), '30');
+  assert.equal((await limited.json()).recoveryRequired, true);
+  assert.equal((await request(handle, 'submit', job)).status, 202);
+  const recovery = await request(handle, 'recover', { operationId: job.operationId });
+  assert.equal((await recovery.json()).receipt.status, 'not_found');
+  assert.equal(calls.length, 2);
+  const replay = await request(handle, 'replay', { operationId: job.operationId });
+  assert.equal((await replay.json()).taskId, 'accepted-after-rate-limit');
+  assert.equal(calls[1].key, calls[0].key);
+  assert.equal(calls[2].key, calls[0].key);
+  assert.deepEqual(calls[3], calls[0]);
+});
+
+test('pending receipt forwards its retry instruction and blocks replay', async t => {
+  let submissions = 0;
+  const provider = mediaApi({
+    apiKey: 'isolated-fixture-key',
+    async transport(url) {
+      if (url.pathname.endsWith('/submission')) {
+        return Response.json({ status: 'pending' }, { headers: { 'Retry-After': '5' } });
+      }
+      submissions++;
+      return Response.json({ code: 'SUBMISSION_PENDING' }, { status: 409, headers: { 'Retry-After': '5' } });
+    },
+  });
+  const handle = setup(t, provider);
+  const job = submission(randomUUID());
+  const initial = await request(handle, 'submit', job);
+  assert.equal(initial.status, 202);
+  assert.equal(initial.headers.get('Retry-After'), '5');
+  const replay = await request(handle, 'replay', { operationId: job.operationId });
+  assert.equal(replay.status, 202);
+  assert.equal(replay.headers.get('Retry-After'), '5');
+  assert.equal((await replay.json()).receipt.status, 'pending');
+  assert.equal(submissions, 1);
+});
+
+test('missing budget and revoked application credentials prevent provider writes', async t => {
+  let submissions = 0;
+  const configuredTenants = [...tenants];
+  const handle = setup(t, {
+    async submit() { submissions++; return { taskId: 'tenant-owned-task' }; },
+  }, configuredTenants);
+  const job = submission(randomUUID());
+  assert.equal((await request(handle, 'submit', { ...job, maxCostUsd: undefined })).status, 400);
+  assert.equal(submissions, 0);
+  assert.equal((await request(handle, 'submit', job)).status, 200);
+  configuredTenants.shift();
+  assert.equal((await request(handle, 'cancel', { operationId: job.operationId })).status, 401);
+  assert.equal((await request(handle, 'submit', submission(randomUUID()))).status, 401);
+  assert.equal(submissions, 1);
 });
 
 test('retryable receipt replays the exact stored payload and provider key', async t => {
