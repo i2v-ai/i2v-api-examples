@@ -496,7 +496,7 @@ models/
     ├── README.md          model summary, request & response shape, limits
     ├── <use-case>.py      Python 3.8+ · standard library only
     ├── <use-case>.ts      Node.js 18+ · native fetch · no dependencies
-    └── <use-case>.sh      curl only · no jq
+    └── <use-case>.sh      Bash · curl and jq
 ```
 
 Use-case names are shared across models so you always know what to look for: `text-to-image`, `image-to-image`, `text-to-video`, `image-to-video`, `first-last-frame-to-video`, `reference-to-video`, `omni-reference-to-video`, `video-to-video`, `motion-control`.
@@ -521,7 +521,7 @@ Folder names are the public model ids you send in `model`. A model only ships th
 
 ## Contributing
 
-Found a broken example or want a use case covered? [Open an issue](https://github.com/i2v-ai/i2v-api-examples/issues). Scripts are maintained by the i2v team and kept in sync with the live API.
+Use [Discussions](https://github.com/i2v-ai/i2v-api-examples/discussions) for setup questions, workflow ideas, and requests for an example. File a [bug report](https://github.com/i2v-ai/i2v-api-examples/issues/new/choose) for a reproducible issue. See [Contributing](./CONTRIBUTING.md) to test your changes and [Security](./SECURITY.md) for private reports.
 
 ## License
 

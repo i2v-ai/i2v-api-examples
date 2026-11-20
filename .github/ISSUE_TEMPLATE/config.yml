@@ -1,0 +1,10 @@
+contact_links:
+  - name: Integration questions and examples
+    url: https://github.com/i2v-ai/i2v-api-examples/discussions
+    about: Ask setup questions, share a workflow, or request a new example.
+  - name: Private vulnerability reporting
+    url: https://github.com/i2v-ai/i2v-api-examples/security/advisories/new
+    about: Report a security concern privately.
+  - name: Account and billing support
+    url: https://i2v.ai/contact
+    about: Get help with private account or billing information.

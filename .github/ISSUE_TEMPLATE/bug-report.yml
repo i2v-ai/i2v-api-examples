@@ -1,0 +1,49 @@
+name: Report an integration bug
+description: Report a reproducible problem with an example, starter, workflow, or API response.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic media and remove keys, headers with secrets, idempotency keys, private prompts, and signed URLs from the report.
+        For billing information or security reports, use the private links in the issue chooser.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected example
+      options:
+        - Model example
+        - REST quickstart
+        - Next.js starter
+        - n8n workflow
+        - Make or Zapier guide
+        - API documentation
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Example path and environment
+      description: Include the example path, commit or release, and Node.js, Python, shell, or workflow platform version.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the command and a minimal synthetic request. Identify whether it uses mock mode or the live API.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Name the failing step, such as upload, quote, submission, recovery, polling, or webhook. Include the error code when available.
+    validations:
+      required: true
+  - type: textarea
+    id: metadata
+    attributes:
+      label: Redacted diagnostic output
+      description: Optional. Include a request ID or a short response excerpt without private data.
+      render: text
