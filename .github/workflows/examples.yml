@@ -21,7 +21,7 @@ jobs:
           python-version: '3.12'
       - run: npm --prefix starters/nextjs ci
       - run: npm --prefix starters/nextjs test
-      - run: node --test quickstart/media.test.mjs
+      - run: node --test quickstart/media.test.mjs models/quote-examples.test.mjs
       - run: npm --prefix starters/nextjs run build
       - run: |
           node --check lib/media.mjs
