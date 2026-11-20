@@ -21,24 +21,24 @@
 
 ## Quick start
 
+The account and generation examples target OpenAPI 2.2.0. Check the [API contract](https://api.i2v.ai/openapi.json) before using the quote and recovery endpoints. The catalog can be read independently.
+
+Use any shell with Node.js 22, or choose the Bash and Python examples.
+
 ```bash
-# 1. Get an API key → https://i2v.ai/me?section=api-keys
-cp .env.example .env            # then paste I2V_API_KEY=...
-# or: export I2V_API_KEY=your-api-key
-
-# 2. Grab the examples
 git clone https://github.com/i2v-ai/i2v-api-examples.git
-cd i2v-api-examples/models/seedance-2-0
-
-# 3. Run one
-python3 text-to-video.py          # Python 3.8+, standard library only
-npx tsx text-to-video.ts          # Node.js 18+, no dependencies
-bash text-to-video.sh             # curl only
+cd i2v-api-examples
+node quickstart/media.mjs catalog
+# Set I2V_API_KEY in your environment before using a quote or account operation.
+node quickstart/media.mjs quote image
+node quickstart/media.mjs quote video
 ```
 
-Every script is a single file with no shared imports. Copy it anywhere, edit the `INPUTS` block at the top, run it. It submits the task with an `Idempotency-Key`, polls until the task finishes, and saves the result next to the script.
+Model-specific examples in `models/` quote the selected inputs and stop by default. They submit only when you set both `I2V_MAX_COST_USD` and `I2V_RECEIPT_PATH`. Set a reviewed USD decimal amount and a new receipt file in a private folder. Bash scripts require curl and jq. Use the receipt to recover the same operation after a timeout.
 
-<br>
+- [cURL, Node.js, and Python quickstart](./quickstart) covers quote, submit, and recovery.
+- [Next.js starter](./starters/nextjs) demonstrates job ownership, persistence, and signed webhooks.
+- [Workflow guides](./workflows) cover Make and Zapier HTTP integration and include importable n8n templates.
 
 ## Models
 

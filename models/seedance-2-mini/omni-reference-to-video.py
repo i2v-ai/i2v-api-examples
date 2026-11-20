@@ -10,6 +10,7 @@
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -75,6 +76,11 @@ HEADERS = {
 }
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def api(method, path, body=None, idempotency_key=None):
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
@@ -83,20 +89,31 @@ def api(method, path, body=None, idempotency_key=None):
     if idempotency_key:
         request.add_header("Idempotency-Key", idempotency_key)
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
-        detail = error.read().decode()
-        sys.exit(f"HTTP {error.code} {path}: {detail}")
+        sys.exit(f"HTTP {error.code}. Request ID: {error.headers.get('X-Request-ID')}")
 
 
-# 1. Submit the task. The same Idempotency-Key plus the same body replays one task.
-task = api(
-    "POST",
-    "/jobs/createTask",
-    {"model": MODEL, "inputs": INPUTS},
-    idempotency_key=str(uuid.uuid4()),
-)
+spec = {"model": MODEL, "inputs": INPUTS}
+quote = api("POST", "/jobs/quote", spec)
+print(f"Maximum reservation: {quote['maximum']['amount']} USD")
+cap = os.environ.get("I2V_MAX_COST_USD")
+if not cap:
+    sys.exit(0)
+if not re.fullmatch(r"(0|[1-9][0-9]*)(\.[0-9]{1,8})?", cap):
+    sys.exit("Set I2V_MAX_COST_USD to the decimal amount you approve.")
+revision = quote.get("expectedRevision")
+if type(revision) is not int or revision < 0:
+    sys.exit("The quote is missing a valid model revision.")
+receipt_path = os.environ.get("I2V_RECEIPT_PATH")
+if not receipt_path:
+    sys.exit("Set I2V_RECEIPT_PATH to a new file in a private directory.")
+idempotency_key = os.environ.get("I2V_IDEMPOTENCY_KEY") or str(uuid.uuid4())
+payload = {**spec, "maxCostUsd": cap, "expectedRevision": revision}
+with os.fdopen(os.open(receipt_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as receipt:
+    json.dump({"submission": json.dumps(payload), "idempotencyKey": idempotency_key}, receipt)
+task = api("POST", "/jobs/createTask", payload, idempotency_key=idempotency_key)
 task_id = task["taskId"]
 print(f"Task created: {task_id}")
 
@@ -127,4 +144,4 @@ for index, item in enumerate(output):
     with urllib.request.urlopen(request) as response:
         with open(filename, "wb") as handle:
             handle.write(response.read())
-    print(f"Saved {filename}  {item.get('width')}x{item.get('height')}  {url}")
+    print(f"Saved {filename}  {item.get('width')}x{item.get('height')}")

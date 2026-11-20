@@ -13,3 +13,8 @@
 
 node_modules/
 __pycache__/
+
+.receipts/
+node_modules/
+.next/
+*.sqlite*

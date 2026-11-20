@@ -6,7 +6,7 @@
 #   export I2V_API_KEY=your-api-key     # https://i2v.ai/me?section=api-keys
 #   bash image-to-video.sh
 #
-# Requires only curl. No jq needed.
+# Requires curl and jq.
 set -euo pipefail
 
 # Load .env from this script's directory or any parent. Does not override existing vars.
@@ -56,16 +56,25 @@ API_BASE="${API_BASE%/}"
 AUTH=(-H "Authorization: Bearer $I2V_API_KEY")
 IDEMPOTENCY_KEY="${I2V_IDEMPOTENCY_KEY:-$(uuidgen 2>/dev/null || echo "i2v-$(date +%s)-$RANDOM")}"
 
-# 1. Submit the task
-RESPONSE=$(curl -sS -X POST "$API_BASE/jobs/createTask" \
+SPEC=$(jq -cn --arg model "$MODEL" --argjson inputs "$INPUTS" '{model: $model, inputs: $inputs}')
+QUOTE=$(curl --fail-with-body -sS --max-time 20 "$API_BASE/jobs/quote" "${AUTH[@]}" \
+  -H "Content-Type: application/json" --data "$SPEC")
+printf 'Maximum reservation: %s USD\n' "$(printf '%s' "$QUOTE" | jq -er '.maximum.amount')"
+[[ -n "${I2V_MAX_COST_USD:-}" ]] || exit 0
+[[ "$I2V_MAX_COST_USD" =~ ^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$ ]] || {
+  echo "Set I2V_MAX_COST_USD to the decimal amount you approve." >&2; exit 1
+}
+: "${I2V_RECEIPT_PATH:?Set I2V_RECEIPT_PATH to a new file in a private directory}"
+PAYLOAD=$(printf '%s' "$SPEC" | jq -ce --arg max "$I2V_MAX_COST_USD" --argjson quote "$QUOTE" \
+  'select($quote.expectedRevision | type == "number" and . >= 0 and (. == floor)) |
+   . + {maxCostUsd: $max, expectedRevision: $quote.expectedRevision}')
+(umask 077; set -o noclobber
+  jq -cn --arg payload "$PAYLOAD" --arg key "$IDEMPOTENCY_KEY" \
+    '{submission: $payload, idempotencyKey: $key}' > "$I2V_RECEIPT_PATH")
+RESPONSE=$(curl --fail-with-body -sS --max-time 20 "$API_BASE/jobs/createTask" \
   "${AUTH[@]}" -H "Content-Type: application/json" \
-  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
-  -d "{\"model\":\"$MODEL\",\"inputs\":$INPUTS}")
-TASK_ID=$(printf '%s' "$RESPONSE" | grep -o '"taskId":"[^"]*"' | cut -d'"' -f4 || true)
-if [[ -z "$TASK_ID" ]]; then
-  echo "createTask failed: $RESPONSE" >&2
-  exit 1
-fi
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" --data "$PAYLOAD")
+TASK_ID=$(printf '%s' "$RESPONSE" | jq -er '.taskId | select(type == "string" and length > 0)')
 echo "Task created: $TASK_ID"
 
 # 2. Poll until it reaches a terminal state (success | fail)
@@ -94,4 +103,4 @@ URL=$(printf '%s' "$RESULT" | grep -o '"url":"[^"]*"' | head -1 | cut -d'"' -f4)
 EXT="${URL##*.}"; EXT="${EXT%%\?*}"
 OUT="image-to-video.${EXT:-mp4}"
 curl -sS -o "$OUT" "$URL"
-echo "Saved $OUT  $URL"
+echo "Saved $OUT"

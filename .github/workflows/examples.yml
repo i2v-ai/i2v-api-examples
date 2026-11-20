@@ -1,0 +1,30 @@
+name: Check API examples
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: starters/nextjs/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm --prefix starters/nextjs ci
+      - run: npm --prefix starters/nextjs test
+      - run: npm --prefix starters/nextjs run build
+      - run: |
+          node --check lib/media.mjs
+          node --check quickstart/media.mjs
+          find models quickstart -name '*.sh' -print0 | xargs -0 -I '{}' bash -n '{}'
+          python -m compileall -q models quickstart
+          for file in workflows/n8n/*.json; do jq -e '.active == false' "$file"; done

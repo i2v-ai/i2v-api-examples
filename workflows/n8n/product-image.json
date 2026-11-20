@@ -1,0 +1,533 @@
+{
+  "id": "i2v-product-image",
+  "name": "i2v.ai Product Image",
+  "nodes": [
+    {
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "5c3ad148-4ec5-53d2-91e3-51782c0473fe",
+      "parameters": {}
+    },
+    {
+      "name": "Request and approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        0
+      ],
+      "id": "3d8371af-ceaf-55e9-a862-cb5e2464b694",
+      "parameters": {
+        "jsCode": "return [{json: {\n  \"approved\": false,\n  \"maxCostUsd\": \"\",\n  \"operationId\": \"\",\n  \"model\": \"gpt-image-2\",\n  \"prompt\": \"A ceramic mug on an oak table in soft daylight\"\n}}];"
+      }
+    },
+    {
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        0
+      ],
+      "id": "77c1b854-272f-52dc-9d70-23aea811e99a",
+      "parameters": {
+        "jsCode": "const { approved, operationId, maxCostUsd, model, prompt, referenceImageUrl } = $input.first().json;\nif (typeof approved !== 'boolean' || typeof prompt !== 'string' || !prompt.trim()) throw new Error('Enter a prompt and an approval setting.');\nif (approved && (!/^[0-9a-zA-Z_-]{10,100}$/.test(operationId) || typeof maxCostUsd !== 'string' || !/^\\d+(\\.\\d{1,8})?$/.test(maxCostUsd))) {\n  throw new Error('For approved generation, use one stable operation ID and an exact USD ceiling.');\n}\nconst inputs = { prompt };\nif (referenceImageUrl) {\n  if (!referenceImageUrl.startsWith('https://')) throw new Error('Use a verified HTTPS reference image URL.');\n  inputs.referenceImageUrls = [referenceImageUrl];\n}\nreturn [{json: { approved, operationId, maxCostUsd, model, inputs }}];"
+      }
+    },
+    {
+      "name": "Quote exact inputs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        0
+      ],
+      "id": "1afd36e7-beff-5c97-a164-d705732ce609",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.i2v.ai/api/v1/jobs/quote",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({model: $json.model, inputs: $json.inputs}) }}"
+      },
+      "onError": "stopWorkflow"
+    },
+    {
+      "name": "Review quote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        0
+      ],
+      "id": "bcfefaef-dfe6-5bc7-b8b4-d70b9e29f958",
+      "parameters": {
+        "jsCode": "const quote = $input.first().json;\nconst config = $('Validate input').first().json;\nconst usd = (value) => {\n  if (typeof value !== 'string' || !/^\\d+(\\.\\d{1,8})?$/.test(value)) throw new Error('Invalid USD quote.');\n  const [whole, fraction = ''] = value.split('.');\n  return BigInt(whole) * 100000000n + BigInt(fraction.padEnd(8, '0'));\n};\nconst maximum = quote.maximum.amount;\nif (!Number.isSafeInteger(quote.expectedRevision) || quote.expectedRevision < 0) throw new Error('The quote is missing the model revision.');\nconst shouldSubmit = config.approved && usd(maximum) <= usd(config.maxCostUsd);\nreturn [{json: {\n  shouldSubmit, maximumUsd: maximum, operationId: config.operationId,\n  status: shouldSubmit ? 'approved' : (config.approved ? 'budget_exceeded' : 'awaiting_approval'),\n  submission: { model: config.model, inputs: config.inputs, maxCostUsd: config.maxCostUsd, expectedRevision: quote.expectedRevision }\n}}];"
+      }
+    },
+    {
+      "name": "Within approved USD limit?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "a200e9b3-5707-50a7-ba18-f619a41eb318",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "typeValidation": "strict",
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "2c3f554d-9e5a-5b40-bb02-3db49a56c2a1",
+              "leftValue": "={{ $json.shouldSubmit }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Submit original operation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        -96
+      ],
+      "id": "92330025-e8e0-52f9-8d87-f53cb55dad7e",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.i2v.ai/api/v1/jobs/createTask",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.submission) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.operationId }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Stop after the quote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        155
+      ],
+      "id": "7b41ed33-2e2a-54de-83a4-7b76e25f25c1",
+      "parameters": {
+        "jsCode": "const {status, maximumUsd} = $input.first().json; return [{json: {status, maximumUsd}}];"
+      }
+    },
+    {
+      "name": "Recover original receipt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        132
+      ],
+      "id": "5aefc39e-7c83-547e-8140-7d72d594f5af",
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.i2v.ai/api/v1/jobs/submission",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $('Review quote').first().json.operationId }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Read accepted task ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        0
+      ],
+      "id": "e214c400-0cea-5a41-bde8-1d1c3d90928d",
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nreturn [{json: {\n  taskId: result.taskId ?? null,\n  status: result.status ?? (result.taskId ? 'accepted' : 'unconfirmed'),\n  operationId: $('Review quote').first().json.operationId\n}}];"
+      }
+    },
+    {
+      "name": "Has accepted task ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2304,
+        0
+      ],
+      "id": "ce73a989-de44-50c0-91ff-864f17cf47ab",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "typeValidation": "strict",
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "a8ca4521-3e12-5de1-b35c-8ef383ddb38f",
+              "leftValue": "={{ typeof $json.taskId === \"string\" && $json.taskId.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Wait before polling",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2528,
+        -96
+      ],
+      "id": "6ec2aa97-bc57-59aa-961a-bfae1c35fcb9",
+      "parameters": {
+        "amount": "={{ Math.max(5, Math.min(30, $json.lifecycle?.pollAfterSeconds ?? 5)) }}",
+        "unit": "seconds"
+      }
+    },
+    {
+      "name": "Read the same task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2784,
+        -96
+      ],
+      "id": "657d0b09-2ca1-565f-b02f-c19fbd59cd48",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.i2v.ai/api/v1/jobs/recordInfo?taskId={{ encodeURIComponent($json.taskId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "onError": "stopWorkflow"
+    },
+    {
+      "name": "Check task state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        -96
+      ],
+      "id": "29a0a072-b8e2-51b6-b8c3-84eb6d232852",
+      "parameters": {
+        "jsCode": "const task = $input.first().json;\nif (typeof task.taskId !== 'string' || !task.taskId) throw new Error('Task response did not include the task ID.');\nconst continuePolling = !['success', 'fail'].includes(task.status) && $runIndex < 23;\nreturn [{json: {...task, continuePolling, operationId: $('Review quote').first().json.operationId }}];"
+      }
+    },
+    {
+      "name": "Continue polling?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3296,
+        -96
+      ],
+      "id": "47a6d94e-078a-5275-a26b-b95b811322b2",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "typeValidation": "strict",
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "1d07310c-9fda-5c6e-a169-d2c2bd244e64",
+              "leftValue": "={{ $json.continuePolling }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Return result or recovery details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3552,
+        64
+      ],
+      "id": "be554a49-6fe8-57a0-b5c0-c7c72710483b",
+      "parameters": {
+        "jsCode": "const { taskId, status, output, lifecycle, operationId } = $input.first().json;\nreturn [{json: { taskId, status, output, lifecycle, operationId }}];"
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Request and approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request and approval": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Quote exact inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote exact inputs": {
+      "main": [
+        [
+          {
+            "node": "Review quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review quote": {
+      "main": [
+        [
+          {
+            "node": "Within approved USD limit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recover original receipt": {
+      "main": [
+        [
+          {
+            "node": "Read accepted task ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read accepted task ID": {
+      "main": [
+        [
+          {
+            "node": "Has accepted task ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before polling": {
+      "main": [
+        [
+          {
+            "node": "Read the same task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the same task": {
+      "main": [
+        [
+          {
+            "node": "Check task state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check task state": {
+      "main": [
+        [
+          {
+            "node": "Continue polling?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within approved USD limit?": {
+      "main": [
+        [
+          {
+            "node": "Submit original operation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop after the quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit original operation": {
+      "main": [
+        [
+          {
+            "node": "Read accepted task ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Recover original receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has accepted task ID?": {
+      "main": [
+        [
+          {
+            "node": "Wait before polling",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return result or recovery details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue polling?": {
+      "main": [
+        [
+          {
+            "node": "Wait before polling",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return result or recovery details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

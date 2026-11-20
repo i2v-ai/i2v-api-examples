@@ -88,22 +88,38 @@ async function api<T>(
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
+    redirect: "error",
+    signal: AbortSignal.timeout(20_000),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${path}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}. Request ID: ${res.headers.get("X-Request-ID") ?? "unavailable"}`);
   return res.json() as Promise<T>;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main() {
-  // 1. Submit the task. The same Idempotency-Key plus the same body replays one task.
-  const { taskId } = await api<{ taskId: string }>(
-    "POST",
-    "/jobs/createTask",
-    { model: MODEL, inputs: INPUTS },
-    randomUUID(),
+  const spec = { model: MODEL, inputs: INPUTS };
+  const quote = await api<{ maximum: { amount: string }; expectedRevision: number }>(
+    "POST", "/jobs/quote", spec,
   );
+  console.log(`Maximum reservation: ${quote.maximum.amount} USD`);
+  const maxCostUsd = process.env.I2V_MAX_COST_USD;
+  if (!maxCostUsd) return;
+  if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$/.test(maxCostUsd)) {
+    throw new Error("Set I2V_MAX_COST_USD to the decimal amount you approve.");
+  }
+  if (!Number.isSafeInteger(quote.expectedRevision) || quote.expectedRevision < 0) {
+    throw new Error("The quote is missing a valid model revision.");
+  }
+  const receiptPath = process.env.I2V_RECEIPT_PATH;
+  if (!receiptPath) throw new Error("Set I2V_RECEIPT_PATH to a new file in a private directory.");
+  const idempotencyKey = process.env.I2V_IDEMPOTENCY_KEY || randomUUID();
+  const payload = { ...spec, maxCostUsd, expectedRevision: quote.expectedRevision };
+  await writeFile(receiptPath, JSON.stringify({ submission: JSON.stringify(payload), idempotencyKey }), {
+    flag: "wx", mode: 0o600,
+  });
+  const { taskId } = await api<{ taskId: string }>("POST", "/jobs/createTask", payload, idempotencyKey);
   console.log(`Task created: ${taskId}`);
 
   // 2. Poll until it reaches a terminal state (success | fail)
@@ -130,9 +146,9 @@ async function main() {
     const extension = new URL(item.url).pathname.match(/\.[a-z0-9]+$/i)?.[0] ?? ".png";
     const filename = items.length > 1 ? `text-to-image-${index}${extension}` : `text-to-image${extension}`;
     const res = await fetch(item.url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} downloading ${item.url}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} while downloading the result`);
     await writeFile(filename, Buffer.from(await res.arrayBuffer()));
-    console.log(`Saved ${filename}  ${item.width}x${item.height}  ${item.url}`);
+    console.log(`Saved ${filename}  ${item.width}x${item.height}`);
   }
 }
 
