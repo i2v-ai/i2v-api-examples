@@ -33,6 +33,18 @@ function request(handle, path, body, { token = tenants[0].token, headers = {} } 
 const spec = { model: 'gpt-image-2', prompt: 'Fixture image' };
 const submission = operationId => ({ ...spec, operationId, maxCostUsd: '0.10000000', expectedRevision: 1 });
 
+function signedCallback(handle, task, eventId, { invalid = false } = {}) {
+  const raw = JSON.stringify({ eventId, event: 'task.completed', data: task });
+  const timestamp = String(now / 1000);
+  const signature = createHmac('sha256', key).update(timestamp + '.').update(raw).digest('hex');
+  return request(handle, 'webhook', invalid ? raw + '\n' : raw, {
+    headers: {
+      'X-I2V-Signature': 'v1=' + signature, 'X-I2V-Event-ID': eventId,
+      'X-I2V-Key-ID': 'active', 'X-I2V-Timestamp': timestamp,
+    },
+  });
+}
+
 test('quote is read-only, and repeated submissions have one provider call', async t => {
   let count = 0;
   const fixture = fixtureMediaApi();
@@ -178,23 +190,51 @@ test('verify signed delivery, reject payload changes, and preserve a terminal st
   const handle = setup(t);
   const operationId = randomUUID();
   const { taskId } = await (await request(handle, 'submit', submission(operationId))).json();
-  function callback(status, eventId, { invalid = false } = {}) {
-    const raw = JSON.stringify({ eventId, event: 'task.completed', data: { taskId, status, output: null } });
-    const timestamp = String(now / 1000);
-    const signature = createHmac('sha256', key).update(timestamp + '.').update(raw).digest('hex');
-    return request(handle, 'webhook', invalid ? raw + '\n' : raw, {
-      headers: {
-        'X-I2V-Signature': 'v1=' + signature, 'X-I2V-Event-ID': eventId,
-        'X-I2V-Key-ID': 'active', 'X-I2V-Timestamp': timestamp,
-      },
-    });
-  }
+  const callback = (status, eventId, options) => signedCallback(handle, { taskId, status, output: null }, eventId, options);
   assert.equal((await callback('success', 'event-first', { invalid: true })).status, 401);
   assert.equal((await callback('success', 'event-first')).status, 200);
   assert.equal((await callback('success', 'event-first')).status, 200);
   assert.equal((await callback('fail', 'late-event')).status, 200);
   const status = await (await request(handle, 'task?operationId=' + operationId)).json();
   assert.equal(status.status, 'success');
+});
+
+test('retries a valid callback that arrives before the original task receipt is recovered', async t => {
+  const taskId = 'accepted-before-response-was-lost';
+  let submittedKey;
+  let polls = 0;
+  const handle = setup(t, {
+    async submit(_body, providerKey) {
+      submittedKey = providerKey;
+      throw Object.assign(new Error('Response lost after acceptance'), { status: 503 });
+    },
+    async receipt(providerKey) {
+      assert.equal(providerKey, submittedKey);
+      return { status: 'accepted', taskId };
+    },
+    async task() {
+      polls++;
+      throw new Error('The signed callback should supply the terminal state.');
+    },
+  });
+  const operationId = randomUUID();
+  const accepted = await request(handle, 'submit', submission(operationId));
+  assert.equal(accepted.status, 202);
+  assert.equal((await accepted.json()).recoveryRequired, true);
+
+  const complete = { taskId, status: 'success', output: [{ url: 'https://example.invalid/image.webp' }] };
+  const callback = () => signedCallback(handle, complete, 'accepted-task-completed');
+  assert.equal((await callback()).status, 409);
+  const recovered = await request(handle, 'recover', { operationId });
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).taskId, taskId);
+  assert.equal((await callback()).status, 200);
+  assert.equal((await callback()).status, 200);
+
+  const stored = await (await request(handle, 'task?operationId=' + operationId)).json();
+  assert.deepEqual(stored.output, complete.output);
+  assert.equal(stored.status, 'success');
+  assert.equal(polls, 0);
 });
 
 test('queued cancellation records the cancelled phase for an owned task', async t => {
