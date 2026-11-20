@@ -11,6 +11,7 @@ for (const [file, variant] of [
   ['product-image', 'quote'],
   ['product-image', 'success'],
   ['reference-video', 'recover'],
+  ['reference-video', 'fail'],
 ]) {
   const path = new URL('../' + file + '.json', import.meta.url);
   const workflow = JSON.parse(readFileSync(path, 'utf8'));

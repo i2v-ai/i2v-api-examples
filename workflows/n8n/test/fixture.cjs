@@ -11,6 +11,12 @@ http.createServer(async (req, res) => {
   const key = req.headers['idempotency-key'];
   if (path === '/api/v1/jobs/recordInfo') {
     const taskId = new URL(req.url, 'http://fixture').searchParams.get('taskId');
+    if (taskId?.endsWith('-fail')) {
+      return reply(200, {
+        taskId, status: 'fail', output: null,
+        error: { code: 'invalid_params', message: 'The reference is not compatible with the requested model.' },
+      });
+    }
     return reply(200, { taskId, status: 'success', output: [{ url: 'https://fixture.example/output' }] });
   }
   if (path === '/api/v1/jobs/submission') {

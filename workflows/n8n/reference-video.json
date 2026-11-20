@@ -338,7 +338,7 @@
       ],
       "id": "d9e67b84-6d88-5241-876f-2bfe2b3e07ec",
       "parameters": {
-        "jsCode": "const { taskId, status, output, lifecycle, operationId } = $input.first().json;\nreturn [{json: { taskId, status, output, lifecycle, operationId }}];"
+        "jsCode": "const { taskId, status, output, lifecycle, operationId, errorCode, error } = $input.first().json;\nreturn [{json: {\n  taskId, status, output, lifecycle, operationId,\n  ...(errorCode ? { errorCode } : {}),\n  ...(error ? { error } : {})\n}}];"
       }
     }
   ],
